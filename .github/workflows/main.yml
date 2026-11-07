@@ -7,4 +7,5 @@ name: Main Pipeline
 
 jobs:
   security-scan:
-    uses: ./github/workflows/pipeline-scan.yml
+    #uses: ./github/workflows/pipeline-scan.yml
+    uses: ./github/workflows/build-and-container-scan.yml
