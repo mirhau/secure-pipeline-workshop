@@ -19,15 +19,17 @@ env:
 
 jobs:
   build-and-container-scan:
-    name: Container Scan with Trivy
+    name: Container Scan with Grype
     runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write
+      actions: read
     outputs:
       digest: ${{ steps.build.outputs.imageid }}
       tag: ${{ steps.meta.outputs.tags }}
       scan-result: ${{ steps.scan-result.outputs.result }}
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,41 +62,36 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Run Trivy vulnerability scanner
+      - name: Run Grype vulnerability scanner
         id: scan-tool
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
-          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
-          format: "sarif"
-          output: "trivy-image.sarif"
-          limit-severities-for-sarif: true
-          hide-progress: true
-          exit-code: "1"
-          ignore-unfixed: true
-          vuln-type: "os,library"
-          severity: "CRITICAL,HIGH"
-        continue-on-error: false
+          image: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+          fail-build: true
+          severity-cutoff: high
+          output-format: sarif
+          add-cpes-if-none: true
 
       - name: Summarize findings
-        if: always() && hashFiles('trivy-image.sarif') != ''
+        if: always() && steps.scan-tool.outputs.sarif != ''
         run: |
-          SARIF=trivy-image.sarif
+          SARIF="${{ steps.scan-tool.outputs.sarif }}"
           COUNT=$(jq '[.runs[].results[]] | length' "$SARIF")
           if [ "${COUNT:-0}" -eq 0 ]; then
             echo "✅ No security alerts"
           else
-            echo "❌ Found $COUNT Trivy container finding(s):"
+            echo "❌ Found $COUNT Grype finding(s):"
             jq -r '.runs[].results[] |
               "  - \(.ruleId) | \(.message.text)\n      \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine // 1)"' \
               "$SARIF"
           fi
 
-      - name: Upload SARIF to GitHub Code Scanning
-        if: always() && hashFiles('trivy-image.sarif') != ''
+      - name: Upload SARIF to GitHub Advanced Security
+        if: always()
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
-          sarif_file: trivy-image.sarif
-          category: trivy-image
+          sarif_file: ${{ steps.scan-tool.outputs.sarif }}
+          category: grype-container-scan
 
       - name: Set scan result
         id: scan-result
